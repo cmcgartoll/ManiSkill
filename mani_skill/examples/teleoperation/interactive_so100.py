@@ -43,6 +43,7 @@ def main(args: Args):
         control_mode="pd_joint_pos",
         render_mode="rgb_array",
         reward_mode="none",
+        robot_uids="so100", 
         enable_shadow=True,
         viewer_camera_configs=dict(shader_pack=args.viewer_shader)
     )
@@ -89,6 +90,7 @@ def main(args: Args):
             control_mode="pd_joint_pos",
             render_mode="rgb_array",
             reward_mode="none",
+            robot_uids="so100", 
             human_render_camera_configs=dict(shader_pack=args.video_saving_shader),
         )
         env = RecordEpisode(
@@ -120,7 +122,7 @@ def solve(env: BaseEnv, debug=False, vis=False):
         "pd_joint_pos",
         "pd_joint_pos_vel",
     ], env.unwrapped.control_mode
-    robot_has_gripper = False
+    robot_has_gripper = True
     planner = SO100MotionPlanningSolver(
         env,
         debug=debug,
@@ -136,7 +138,7 @@ def solve(env: BaseEnv, debug=False, vis=False):
     last_checkpoint_state = None
     gripper_open = True
     def select_so100_hand():
-        viewer.select_entity(sapien_utils.get_obj_by_name(env.agent.robot.links, "gripper")._objs[0].entity)
+        viewer.select_entity(sapien_utils.get_obj_by_name(env.agent.robot.links, "Fixed_Jaw")._objs[0].entity)
     select_so100_hand()
     for plugin in viewer.plugins:
         if isinstance(plugin, sapien.utils.viewer.viewer.TransformWindow):
@@ -201,7 +203,9 @@ def solve(env: BaseEnv, debug=False, vis=False):
             transform_window.update_ghost_objects()
         if execute_current_pose:
             # z-offset of end-effector gizmo to TCP position is hardcoded for the so100 robot here
-            result = planner.move_to_pose_with_screw(transform_window._gizmo_pose * sapien.Pose([0, 0, 0.1]), dry_run=True)
+            target_pose = transform_window._gizmo_pose * sapien.Pose([0, 0, 0]) 
+            
+            result = planner.move_to_pose_with_RRTConnect(target_pose, dry_run=True, refine_steps=20)
             if result != -1 and len(result["position"]) < 150:
                 _, reward, _ ,_, info = planner.follow_path(result)
                 print(f"Reward: {reward}, Info: {info}")
