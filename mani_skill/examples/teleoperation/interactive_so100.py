@@ -43,7 +43,7 @@ def main(args: Args):
         control_mode="pd_joint_pos",
         render_mode="rgb_array",
         reward_mode="none",
-        robot_uids="so100", 
+        robot_uids=args.robot_uid, 
         enable_shadow=True,
         viewer_camera_configs=dict(shader_pack=args.viewer_shader)
     )
@@ -52,7 +52,7 @@ def main(args: Args):
         env,
         output_dir=output_dir,
         trajectory_name="trajectory",
-        save_video=False,
+        save_video=True,
         info_on_video=False,
         source_type="teleoperation",
         source_desc="teleoperation via the click+drag system"
@@ -90,7 +90,7 @@ def main(args: Args):
             control_mode="pd_joint_pos",
             render_mode="rgb_array",
             reward_mode="none",
-            robot_uids="so100", 
+            robot_uids=args.robot_uid, 
             human_render_camera_configs=dict(shader_pack=args.video_saving_shader),
         )
         env = RecordEpisode(

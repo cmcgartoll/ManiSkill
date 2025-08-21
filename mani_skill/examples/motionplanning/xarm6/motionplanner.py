@@ -1,99 +1,93 @@
 import numpy as np
 import mplib
-from mani_skill.examples.motionplanning.panda.motionplanner import PandaArmMotionPlanningSolver
+from mani_skill.examples.motionplanning.base_motionplanner.motionplanner import BaseMotionPlanningSolver
 from mani_skill.envs.sapien_env import BaseEnv
-import sapien.core as sapien
 
+from mani_skill.envs.scene import ManiSkillScene
+import sapien.core as sapien
+from transforms3d import quaternions
 from mani_skill.utils.structs.pose import to_sapien_pose
 
 
-class XArm6RobotiqMotionPlanningSolver(PandaArmMotionPlanningSolver):
+class XArm6RobotiqMotionPlanningSolver(BaseMotionPlanningSolver):
     CLOSED = 0.81
     OPEN = 0
+    NUM_LINKS = 6
 
     def __init__(self, env: BaseEnv, debug: bool = False, vis: bool = True, base_pose: sapien.Pose = None, visualize_target_grasp_pose: bool = True, print_env_info: bool = True, joint_vel_limits=0.9, joint_acc_limits=0.9):
-        super().__init__(env, debug, vis, base_pose, visualize_target_grasp_pose, print_env_info, joint_vel_limits, joint_acc_limits)
+        super().__init__(env, debug, vis, base_pose, visualize_target_grasp_pose, print_env_info, joint_vel_limits, joint_acc_limits, num_links=self.NUM_LINKS)
         self.gripper_state = self.OPEN
-
-    def setup_planner(self):
-        link_names = [link.get_name() for link in self.robot.get_links()]
-        joint_names = [joint.get_name() for joint in self.robot.get_active_joints()]
-        planner = mplib.Planner(
-            urdf=self.env_agent.urdf_path,
-            srdf=self.env_agent.urdf_path.replace(".urdf", ".srdf"),
-            user_link_names=link_names,
-            user_joint_names=joint_names,
-            move_group="eef",
-            joint_vel_limits=np.ones(6) * self.joint_vel_limits,
-            joint_acc_limits=np.ones(6) * self.joint_acc_limits,
-        )
-        planner.set_base_pose(np.hstack([self.base_pose.p, self.base_pose.q]))
-        return planner
-    
-    def open_gripper(self):
-        self.gripper_state = self.OPEN
-        qpos = self.robot.get_qpos()[0, :6].cpu().numpy()
-        for i in range(6):
-            if self.control_mode == "pd_joint_pos":
-                action = np.hstack([qpos, self.gripper_state])
-            else:
-                action = np.hstack([qpos, qpos * 0, self.gripper_state])
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            self.elapsed_steps += 1
-            if self.print_env_info:
-                print(
-                    f"[{self.elapsed_steps:3}] Env Output: reward={reward} info={info}"
+        if self.vis and self.visualize_target_grasp_pose:
+            if "grasp_pose_visual" not in self.base_env.scene.actors:
+                self.grasp_pose_visual = self.build_robotiq_gripper_grasp_pose_visual(
+                    self.base_env.scene
                 )
-            if self.vis:
-                self.base_env.render_human()
-        return obs, reward, terminated, truncated, info
-
-    def close_gripper(self, t=6, gripper_state = CLOSED):
-        self.gripper_state = gripper_state
-        qpos = self.robot.get_qpos()[0, :6].cpu().numpy()
-        for i in range(t):
-            if self.control_mode == "pd_joint_pos":
-                action = np.hstack([qpos, self.gripper_state])
             else:
-                action = np.hstack([qpos, qpos * 0, self.gripper_state])
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            self.elapsed_steps += 1
-            if self.print_env_info:
-                print(
-                    f"[{self.elapsed_steps:3}] Env Output: reward={reward} info={info}"
-                )
-            if self.vis:
-                self.base_env.render_human()
-        return obs, reward, terminated, truncated, info
-    
-    def move_to_pose_with_RRTStar(
-        self, pose: sapien.Pose, dry_run: bool = False, refine_steps: int = 0
-    ):
-        pose = to_sapien_pose(pose)
-        if self.grasp_pose_visual is not None:
-            self.grasp_pose_visual.set_pose(pose)
-        pose = sapien.Pose(p=pose.p, q=pose.q)
-        result = self.planner.plan_qpos_to_pose(
-            np.concatenate([pose.p, pose.q]),
-            self.robot.get_qpos().cpu().numpy()[0],
-            time_step=self.base_env.control_timestep,
-            use_point_cloud=self.use_point_cloud,
-            rrt_range=0.0,
-            planning_time=1,
-            planner_name="RRTstar",
-            wrt_world=True,
+                self.grasp_pose_visual = self.base_env.scene.actors["grasp_pose_visual"]
+            self.grasp_pose_visual.set_pose(self.base_env.agent.tcp.pose)
+
+    def build_robotiq_gripper_grasp_pose_visual(self, scene: ManiSkillScene):
+        builder = scene.create_actor_builder()
+        grasp_pose_visual_width = 0.01
+        grasp_width = 0.05
+
+        builder.add_sphere_visual(
+            pose=sapien.Pose(p=[0, 0, 0.0]),
+            radius=grasp_pose_visual_width,
+            material=sapien.render.RenderMaterial(base_color=[0.3, 0.4, 0.8, 0.7])
         )
-        if result["status"] != "Success":
-            print(result["status"])
-            self.render_wait()
-            return -1
-        self.render_wait()
-        if dry_run:
-            return result
-        return self.follow_path(result, refine_steps=refine_steps)
+
+        builder.add_box_visual(
+            pose=sapien.Pose(p=[0, 0, -0.08]),
+            half_size=[grasp_pose_visual_width, grasp_pose_visual_width, 0.02],
+            material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(p=[0, 0, -0.05]),
+            half_size=[grasp_pose_visual_width, grasp_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(
+                p=[
+                    0.03 - grasp_pose_visual_width * 3,
+                    grasp_width + grasp_pose_visual_width,
+                    0.03 - 0.05,
+                ],
+                q=quaternions.axangle2quat(np.array([0, 1, 0]), theta=np.pi / 2),
+            ),
+            half_size=[0.04, grasp_pose_visual_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[0, 0, 1, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(
+                p=[
+                    0.03 - grasp_pose_visual_width * 3,
+                    -grasp_width - grasp_pose_visual_width,
+                    0.03 - 0.05,
+                ],
+                q=quaternions.axangle2quat(np.array([0, 1, 0]), theta=np.pi / 2),
+            ),
+            half_size=[0.04, grasp_pose_visual_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[1, 0, 0, 0.7]),
+        )
+        grasp_pose_visual = builder.build_kinematic(name="grasp_pose_visual")
+        return grasp_pose_visual
 
 
-class XArm6PandaGripperMotionPlanningSolver(PandaArmMotionPlanningSolver):
+class XArm6PandaGripperMotionPlanningSolver(BaseMotionPlanningSolver):
+    NUM_LINKS = 6
+    def __init__(self, env: BaseEnv, debug: bool = False, vis: bool = True, base_pose: sapien.Pose = None, visualize_target_grasp_pose: bool = True, print_env_info: bool = True, joint_vel_limits=0.9, joint_acc_limits=0.9):
+        super().__init__(env, debug, vis, base_pose, visualize_target_grasp_pose, print_env_info, joint_vel_limits, joint_acc_limits, num_links=self.NUM_LINKS)
+        if self.vis and self.visualize_target_grasp_pose:
+            if "grasp_pose_visual" not in self.base_env.scene.actors:
+                self.grasp_pose_visual = self.build_panda_gripper_grasp_pose_visual(
+                    self.base_env.scene
+                )
+            else:
+                self.grasp_pose_visual = self.base_env.scene.actors["grasp_pose_visual"]
+            self.grasp_pose_visual.set_pose(self.base_env.agent.tcp.pose)
+
     def setup_planner(self):
         link_names = [link.get_name() for link in self.robot.get_links()]
         joint_names = [joint.get_name() for joint in self.robot.get_active_joints()]
@@ -103,9 +97,58 @@ class XArm6PandaGripperMotionPlanningSolver(PandaArmMotionPlanningSolver):
             user_link_names=link_names,
             user_joint_names=joint_names,
             move_group="panda_hand_tcp",
-            joint_vel_limits=np.ones(6) * self.joint_vel_limits,
-            joint_acc_limits=np.ones(6) * self.joint_acc_limits,
+            joint_vel_limits=np.ones(self.num_links) * self.joint_vel_limits,
+            joint_acc_limits=np.ones(self.num_links) * self.joint_acc_limits,
         )
         planner.set_base_pose(np.hstack([self.base_pose.p, self.base_pose.q]))
         return planner
+
+    
+    def build_panda_gripper_grasp_pose_visual(self, scene: ManiSkillScene):
+        builder = scene.create_actor_builder()
+        grasp_pose_visual_width = 0.01
+        grasp_width = 0.05
+
+        builder.add_sphere_visual(
+            pose=sapien.Pose(p=[0, 0, 0.0]),
+            radius=grasp_pose_visual_width,
+            material=sapien.render.RenderMaterial(base_color=[0.3, 0.4, 0.8, 0.7])
+        )
+
+        builder.add_box_visual(
+            pose=sapien.Pose(p=[0, 0, -0.08]),
+            half_size=[grasp_pose_visual_width, grasp_pose_visual_width, 0.02],
+            material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(p=[0, 0, -0.05]),
+            half_size=[grasp_pose_visual_width, grasp_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(
+                p=[
+                    0.03 - grasp_pose_visual_width * 3,
+                    grasp_width + grasp_pose_visual_width,
+                    0.03 - 0.05,
+                ],
+                q=quaternions.axangle2quat(np.array([0, 1, 0]), theta=np.pi / 2),
+            ),
+            half_size=[0.04, grasp_pose_visual_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[0, 0, 1, 0.7]),
+        )
+        builder.add_box_visual(
+            pose=sapien.Pose(
+                p=[
+                    0.03 - grasp_pose_visual_width * 3,
+                    -grasp_width - grasp_pose_visual_width,
+                    0.03 - 0.05,
+                ],
+                q=quaternions.axangle2quat(np.array([0, 1, 0]), theta=np.pi / 2),
+            ),
+            half_size=[0.04, grasp_pose_visual_width, grasp_pose_visual_width],
+            material=sapien.render.RenderMaterial(base_color=[1, 0, 0, 0.7]),
+        )
+        grasp_pose_visual = builder.build_kinematic(name="grasp_pose_visual")
+        return grasp_pose_visual
     
