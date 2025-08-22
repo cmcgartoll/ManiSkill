@@ -79,6 +79,8 @@ class BaseMotionPlanningSolver:
 
     def follow_path(self, result, refine_steps: int = 0):
         n_step = result["position"].shape[0]
+        obs, reward, terminated, truncated, info = None, 0.0, False, False, {}
+        
         for i in range(n_step + refine_steps):
             qpos = result["position"][min(i, n_step - 1)]
             if self.control_mode == "pd_joint_pos_vel":

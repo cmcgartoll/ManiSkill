@@ -118,6 +118,7 @@ def main(args: Args):
 
 
 def solve(env: BaseEnv, debug=False, vis=False):
+    target_pose_visual_before_update = None
     assert env.unwrapped.control_mode in [
         "pd_joint_pos",
         "pd_joint_pos_vel",
@@ -204,6 +205,23 @@ def solve(env: BaseEnv, debug=False, vis=False):
         if execute_current_pose:
             # z-offset of end-effector gizmo to TCP position is hardcoded for the so100 robot here
             target_pose = transform_window._gizmo_pose * sapien.Pose([0, 0, 0]) 
+            # Create or update visualization sphere at target pose
+            
+            builder = env.scene.create_actor_builder()
+            if "target_pose_visual_before_update" not in env.scene.actors:
+                builder.add_sphere_visual(
+                    pose=sapien.Pose(p=[0, 0, 0]),  # Relative to actor origin
+                    radius=0.03,
+                    material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 1])  # Bright green, fully opaque
+                )
+                target_pose_visual_before_update = builder.build_kinematic(name="target_pose_visual_before_update")
+            
+            # Update the pose
+            if target_pose_visual_before_update is not None:
+                target_pose_visual_before_update.set_pose(target_pose)
+            
+            # Update scene and force a render update
+            env.scene.update_render()
             
             result = planner.move_to_pose_with_RRTConnect(target_pose, dry_run=True, refine_steps=20)
             if result != -1 and len(result["position"]) < 150:
