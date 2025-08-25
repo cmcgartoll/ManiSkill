@@ -23,7 +23,7 @@ class SO100MotionPlanningSolver(BaseMotionPlanningSolver):
             srdf=self.env_agent.urdf_path.replace(".urdf", ".srdf"),
             user_link_names=link_names,
             user_joint_names=joint_names,
-            move_group="Moving_Jaw",
+            move_group="Fixed_Jaw_tip",
             joint_vel_limits=np.ones(self.num_links) * self.joint_vel_limits,
             joint_acc_limits=np.ones(self.num_links) * self.joint_acc_limits,
         )

@@ -16,6 +16,7 @@ from mani_skill.utils import sapien_utils
 from mani_skill.utils.wrappers.record import RecordEpisode
 import tyro
 from dataclasses import dataclass
+from transforms3d.euler import euler2quat
 
 @dataclass
 class Args:
@@ -136,10 +137,15 @@ def solve(env: BaseEnv, debug=False, vis=False):
     )
     viewer = env.render_human()
     
+    # Fix camera position to prevent automatic following/tracking
+    # Get the current camera pose and keep it fixed
+    
     last_checkpoint_state = None
     gripper_open = True
     def select_so100_hand():
         viewer.select_entity(sapien_utils.get_obj_by_name(env.agent.robot.links, "Fixed_Jaw")._objs[0].entity)
+    def select_so100_base():
+        viewer.select_entity(sapien_utils.get_obj_by_name(env.agent.robot.links, "Base")._objs[0].entity)
     select_so100_hand()
     for plugin in viewer.plugins:
         if isinstance(plugin, sapien.utils.viewer.viewer.TransformWindow):
@@ -151,14 +157,23 @@ def solve(env: BaseEnv, debug=False, vis=False):
         # planner.grasp_pose_visual.set_pose(transform_window._gizmo_pose)
 
         env.render_human()
+
+        fixed_camera_pose = viewer.window.get_camera_pose()
+        
+        # Reset camera to fixed position to prevent tracking/following
+        
+        
         execute_current_pose = False
         if viewer.window.key_press("h"):
             print("""Available commands:
             h: print this help menu
             g: toggle gripper to close/open (if there is a gripper)
-            u: move the so100 hand up
-            j: move the so100 hand down
+            u/j: move the so100 hand up/down
             arrow_keys: move the so100 hand in the direction of the arrow keys
+            a/s: rotate base left/right (shoulder_pan joint)
+            d/f: rotate end-effector pitch up/down
+            z/x: rotate end-effector yaw left/right
+            r: reset camera to fixed position (if camera has moved)
             n: execute command via motion planning to make the robot move to the target pose indicated by the ghost so100 arm
             c: stop this episode and record the trajectory and move on to a new episode
             q: quit the script and stop collecting data. Save trajectories and optionally videos.
@@ -202,26 +217,55 @@ def solve(env: BaseEnv, debug=False, vis=False):
             select_so100_hand()
             transform_window.gizmo_matrix = (transform_window._gizmo_pose * sapien.Pose(p=[0, +0.01, 0])).to_transformation_matrix()
             transform_window.update_ghost_objects()
+        
+        elif viewer.window.key_press("a"):
+            select_so100_base()
+            # Rotate base around Z axis (shoulder_pan joint) by +5 degrees
+            rot = sapien.Pose(q=euler2quat(0, 0, np.deg2rad(5)))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+        elif viewer.window.key_press("s"):
+            select_so100_base()
+            # Rotate base around Z axis (shoulder_pan joint) by -5 degrees
+            rot = sapien.Pose(q=euler2quat(0, 0, np.deg2rad(-5)))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+        elif viewer.window.key_press("d"):
+            select_so100_hand()
+            # Rotate around Y axis (pitch) by +2 degrees
+            rot = sapien.Pose(q=euler2quat(0, np.deg2rad(2), 0))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+        elif viewer.window.key_press("f"):
+            select_so100_hand()
+            # Rotate around Y axis (pitch) by -2 degrees
+            rot = sapien.Pose(q=euler2quat(0, np.deg2rad(-2), 0))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+        elif viewer.window.key_press("z"):
+            select_so100_hand()
+            # Rotate around Z axis (yaw) by +5 degrees
+            rot = sapien.Pose(q=euler2quat(0, 0, np.deg2rad(5)))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+        elif viewer.window.key_press("x"):
+            select_so100_hand()
+            # Rotate around Z axis (yaw) by -5 degrees
+            rot = sapien.Pose(q=euler2quat(0, 0, np.deg2rad(-5)))
+            transform_window.gizmo_matrix = (transform_window._gizmo_pose * rot).to_transformation_matrix()
+            transform_window.update_ghost_objects()
+            viewer.set_camera_pose(fixed_camera_pose)
+
+        # DEBUG: Continuous monitoring of gizmo pose changes
         if execute_current_pose:
+            target_pose = transform_window._gizmo_pose * sapien.Pose(p=[0.01, -0.097, 0]) # for fixed jaw tip 
             # z-offset of end-effector gizmo to TCP position is hardcoded for the so100 robot here
-            target_pose = transform_window._gizmo_pose * sapien.Pose([0, 0, 0]) 
-            # Create or update visualization sphere at target pose
-            
-            builder = env.scene.create_actor_builder()
-            if "target_pose_visual_before_update" not in env.scene.actors:
-                builder.add_sphere_visual(
-                    pose=sapien.Pose(p=[0, 0, 0]),  # Relative to actor origin
-                    radius=0.03,
-                    material=sapien.render.RenderMaterial(base_color=[0, 1, 0, 1])  # Bright green, fully opaque
-                )
-                target_pose_visual_before_update = builder.build_kinematic(name="target_pose_visual_before_update")
-            
-            # Update the pose
-            if target_pose_visual_before_update is not None:
-                target_pose_visual_before_update.set_pose(target_pose)
-            
-            # Update scene and force a render update
-            env.scene.update_render()
+            # target_pose = transform_window._gizmo_pose * sapien.Pose([0, 0, 0])
             
             result = planner.move_to_pose_with_RRTConnect(target_pose, dry_run=True, refine_steps=20)
             if result != -1 and len(result["position"]) < 150:
