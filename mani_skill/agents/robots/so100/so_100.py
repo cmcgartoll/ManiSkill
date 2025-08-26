@@ -102,6 +102,18 @@ class SO100(BaseAgent):
     def tcp_pose(self):
         return Pose.create_from_pq(self.tcp_pos, self.finger1_link.pose.q)
 
+    @staticmethod
+    def build_grasp_pose(approaching, closing, center):
+        """Build a grasp pose for SO100 gripper."""
+        assert np.abs(1 - np.linalg.norm(approaching)) < 1e-3
+        assert np.abs(1 - np.linalg.norm(closing)) < 1e-3
+        assert np.abs(approaching @ closing) <= 1e-3
+        ortho = np.cross(closing, approaching)
+        T = np.eye(4)
+        T[:3, :3] = np.stack([ortho, closing, approaching], axis=1)
+        T[:3, 3] = center
+        return sapien.Pose(T)
+
     def is_grasping(self, object: Actor, min_force=0.5, max_angle=110):
         """Check if the robot is grasping an object
 
